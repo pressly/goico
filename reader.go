@@ -2,11 +2,19 @@ package ico
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/binary"
+	"fmt"
 	"image"
 	"io"
+	"runtime"
+
+	_ "image/png"
+
+	_ "github.com/jsummers/gobmp"
 )
 
-const magicString = "?0?0?1?0"
+var magicString = string([]byte{0010})
 
 // A FormatError reports that the input is not a valid ICO.
 type FormatError string
@@ -25,10 +33,21 @@ type reader interface {
 }
 
 type decoder struct {
-	r     io.Reader
-	num   int
+	r     reader
+	num   uint16
+	dir   []entry
 	image []image.Image
 	tmp   [1024]byte
+}
+
+type entry struct {
+	Width   uint8
+	Height  uint8
+	Palette uint8
+	Plane   uint16
+	Bits    uint16
+	Size    uint32
+	Offset  uint32
 }
 
 func (d *decoder) decode(r io.Reader, configOnly bool) error {
@@ -45,30 +64,56 @@ func (d *decoder) decode(r io.Reader, configOnly bool) error {
 	if configOnly {
 		return nil
 	}
+	if err := d.readImageDir(); err != nil {
+		return err
+	}
 
-	for {
-		// TODO: Write decode loop here
+	d.image = make([]image.Image, d.num)
+	for i, entry := range d.dir {
+		img, err := d.parseImage(entry)
+		if err != nil {
+			return err
+		}
+		d.image[i] = img
+		runtime.GC()
 	}
 	return nil
 }
 
 func (d *decoder) readHeader() error {
-	_, err := io.ReadFull(d.r, d.tmp[0:6])
-	if err != nil {
-		return err
+	var first, second uint16
+	binary.Read(d.r, binary.LittleEndian, &first)
+	binary.Read(d.r, binary.LittleEndian, &second)
+	binary.Read(d.r, binary.LittleEndian, &d.num)
+	if first != 0 {
+		return fmt.Errorf("First byte is %d instead of 0", first)
 	}
-	if d.tmp[0] != 0 {
-		// TODO: Error out here
+	if second != 1 {
+		return fmt.Errorf("Second byte is %d instead of 1", second)
 	}
-	if d.tmp[1] != 1 {
-		// TODO: Error out here
-	}
-	d.num = int(d.tmp[2]) // The number of images
 	return nil
 }
 
-func (d *decoder) parseImage(b []byte) (image.Image, error) {
-	var img image.Image
+func (d *decoder) readImageDir() error {
+	for i := 0; i < int(d.num); i++ {
+		var e entry
+		err := binary.Read(d.r, binary.LittleEndian, &e)
+		if err != nil {
+			return err
+		}
+		d.dir = append(d.dir, e)
+		runtime.GC()
+	}
+	return nil
+}
+
+func (d *decoder) parseImage(e entry) (image.Image, error) {
+	b := make([]byte, e.Size)
+	_, err := io.ReadFull(d.r, b)
+	img, _, err := image.Decode(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
 	return img, nil
 }
 
@@ -86,7 +131,7 @@ func DecodeAll(r io.Reader) (*ICO, error) {
 		return nil, err
 	}
 	ico := &ICO{
-		Num:   len(d.image),
+		Num:   int(d.num),
 		Image: d.image,
 	}
 	return ico, nil
