@@ -10,8 +10,6 @@ import (
 	"runtime"
 
 	_ "image/png"
-
-	_ "github.com/jsummers/gobmp"
 )
 
 var magicString = string([]byte{0010})
@@ -44,6 +42,7 @@ type entry struct {
 	Width   uint8
 	Height  uint8
 	Palette uint8
+	_       uint8 // Reserved byte
 	Plane   uint16
 	Bits    uint16
 	Size    uint32
@@ -89,7 +88,7 @@ func (d *decoder) readHeader() error {
 		return fmt.Errorf("First byte is %d instead of 0", first)
 	}
 	if second != 1 {
-		return fmt.Errorf("Second byte is %d instead of 1", second)
+		return fmt.Errorf("Second byte is %d instead of 1, this is not an ICO file", second)
 	}
 	return nil
 }
@@ -102,14 +101,14 @@ func (d *decoder) readImageDir() error {
 			return err
 		}
 		d.dir = append(d.dir, e)
-		runtime.GC()
 	}
+	fmt.Println(d.dir)
 	return nil
 }
 
 func (d *decoder) parseImage(e entry) (image.Image, error) {
+	off := int(e.Offset) - int((d.num*16)+6)
 	b := make([]byte, e.Size)
-	_, err := io.ReadFull(d.r, b)
 	img, _, err := image.Decode(bytes.NewReader(b))
 	if err != nil {
 		return nil, err

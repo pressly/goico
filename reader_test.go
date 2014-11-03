@@ -1,9 +1,9 @@
 package ico
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
-	"strings"
 	"testing"
 )
 
@@ -14,8 +14,7 @@ func TestDecodeAll(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	s := string(data)
-	r := strings.NewReader(s)
+	r := bytes.NewReader(data)
 	result, err := DecodeAll(r)
 	if err != nil {
 		t.Error(err)
