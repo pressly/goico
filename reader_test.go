@@ -2,7 +2,6 @@ package ico
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"testing"
 )
@@ -15,10 +14,8 @@ func TestDecodeAll(t *testing.T) {
 		t.Error(err)
 	}
 	r := bytes.NewReader(data)
-	result, err := DecodeAll(r)
+	_, err = DecodeAll(r)
 	if err != nil {
 		t.Error(err)
 	}
-	fmt.Println(len(result.Image))
-	fmt.Println(result)
 }

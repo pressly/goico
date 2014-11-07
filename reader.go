@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"io/ioutil"
+	"os"
 	"runtime"
 
-	_ "image/png"
-
-	_ "github.com/jsummers/gobmp"
+	bmp "github.com/jsummers/gobmp"
 )
-
-var magicString = string([]byte{0010})
 
 // A FormatError reports that the input is not a valid ICO.
 type FormatError string
@@ -71,6 +69,7 @@ func (d *decoder) decode(r io.Reader, configOnly bool) error {
 
 	d.image = make([]image.Image, d.num)
 	for i, entry := range d.dir {
+		fmt.Println(d.dir)
 		img, err := d.parseImage(entry)
 		if err != nil {
 			return err
@@ -104,8 +103,34 @@ func (d *decoder) readImageDir() error {
 		}
 		d.dir = append(d.dir, e)
 	}
-	fmt.Println(d.dir)
 	return nil
+}
+
+type DIB struct {
+	HeaderSize uint32
+	Width      uint32
+	Height     uint32
+	Planes     uint16
+	BPP        uint16
+	_          uint32
+	Size       uint32
+	_          uint32
+	_          uint32
+	NumColors  uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
+	_          uint32
 }
 
 func (d *decoder) parseImage(e entry) (image.Image, error) {
@@ -117,11 +142,29 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	img, _, err := image.Decode(bytes.NewReader(b))
+
+	fileHeader := make([]byte, 14)
+	copy(fileHeader[0:2], "\x42\x4D")
+	binary.LittleEndian.PutUint32(fileHeader[2:6], e.Size+14)
+	var iSize uint32
+	binary.Read(bytes.NewReader(b[24:28]), binary.LittleEndian, &iSize)
+	binary.LittleEndian.PutUint32(fileHeader[10:14], uint32(e.Size+14)-iSize)
+
+	bb := append(fileHeader, b...)
+	fmt.Println(len(bb))
+	fmt.Println(len(bb))
+	fmt.Println(len(bb))
+
+	err = ioutil.WriteFile("/vagrant_data/noheader.png", b, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	return img, nil
+	err = ioutil.WriteFile("/vagrant_data/header.png", bb, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+	img, err := bmp.Decode(bytes.NewReader(bb))
+	return img, err
 }
 
 func Decode(r io.Reader) (image.Image, error) {
@@ -155,5 +198,5 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 }
 
 func init() {
-	image.RegisterFormat("ico", magicString, Decode, DecodeConfig)
+	image.RegisterFormat("ico", "", Decode, DecodeConfig)
 }
