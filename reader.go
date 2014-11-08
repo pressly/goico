@@ -9,7 +9,7 @@ import (
 	"image/png"
 	"io"
 
-	bmp "github.com/jsummers/gobmp"
+	"code.google.com/p/go.image/bmp"
 )
 
 // A FormatError reports that the input is not a valid ICO.
