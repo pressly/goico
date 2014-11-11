@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const testImage = "./testdata/reddit.png.ico"
+const testImage = "/vagrant_data/text.ico"
 
 func TestDecodeAll(t *testing.T) {
 	data, err := ioutil.ReadFile(testImage)

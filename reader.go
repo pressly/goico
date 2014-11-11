@@ -6,10 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"image/png"
 	"io"
-	"io/ioutil"
-	"os"
-	"runtime"
 
 	bmp "github.com/jsummers/gobmp"
 )
@@ -18,11 +16,6 @@ import (
 type FormatError string
 
 func (e FormatError) Error() string { return "invalid ICO format: " + string(e) }
-
-// An UnsupportedError reports that the input uses a valid but unimplemented ICO feature.
-type UnsupportedError string
-
-func (e UnsupportedError) Error() string { return "unsupported ICO feature: " + string(e) }
 
 // If the io.Reader does not also have ReadByte, then decode will introduce its own buffering.
 type reader interface {
@@ -35,7 +28,7 @@ type decoder struct {
 	num   uint16
 	dir   []entry
 	image []image.Image
-	tmp   [1024]byte
+	cfg   image.Config
 }
 
 type entry struct {
@@ -60,22 +53,24 @@ func (d *decoder) decode(r io.Reader, configOnly bool) error {
 	if err := d.readHeader(); err != nil {
 		return err
 	}
-	if configOnly {
-		return nil
-	}
-	if err := d.readImageDir(); err != nil {
+	if err := d.readImageDir(configOnly); err != nil {
 		return err
 	}
-
-	d.image = make([]image.Image, d.num)
-	for i, entry := range d.dir {
-		fmt.Println(d.dir)
-		img, err := d.parseImage(entry)
+	if configOnly {
+		cfg, err := d.parseConfig(d.dir[0])
 		if err != nil {
 			return err
 		}
-		d.image[i] = img
-		runtime.GC()
+		d.cfg = cfg
+	} else {
+		d.image = make([]image.Image, d.num)
+		for i, entry := range d.dir {
+			img, err := d.parseImage(entry)
+			if err != nil {
+				return err
+			}
+			d.image[i] = img
+		}
 	}
 	return nil
 }
@@ -86,16 +81,20 @@ func (d *decoder) readHeader() error {
 	binary.Read(d.r, binary.LittleEndian, &second)
 	binary.Read(d.r, binary.LittleEndian, &d.num)
 	if first != 0 {
-		return fmt.Errorf("First byte is %d instead of 0", first)
+		return FormatError(fmt.Sprintf("first byte is %d instead of 0", first))
 	}
 	if second != 1 {
-		return fmt.Errorf("Second byte is %d instead of 1, this is not an ICO file", second)
+		return FormatError(fmt.Sprintf("second byte is %d instead of 1", second))
 	}
 	return nil
 }
 
-func (d *decoder) readImageDir() error {
-	for i := 0; i < int(d.num); i++ {
+func (d *decoder) readImageDir(configOnly bool) error {
+	n := int(d.num)
+	if configOnly {
+		n = 1
+	}
+	for i := 0; i < n; i++ {
 		var e entry
 		err := binary.Read(d.r, binary.LittleEndian, &e)
 		if err != nil {
@@ -106,65 +105,59 @@ func (d *decoder) readImageDir() error {
 	return nil
 }
 
-type DIB struct {
-	HeaderSize uint32
-	Width      uint32
-	Height     uint32
-	Planes     uint16
-	BPP        uint16
-	_          uint32
-	Size       uint32
-	_          uint32
-	_          uint32
-	NumColors  uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
-	_          uint32
+func (d *decoder) parseImage(e entry) (image.Image, error) {
+	tmp := make([]byte, 14+e.Size)
+	n, err := io.ReadFull(d.r, tmp[14:])
+	if n != int(e.Size) {
+		return nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = png.DecodeConfig(bytes.NewReader(tmp[14:]))
+	if err == nil {
+		return png.Decode(bytes.NewReader(tmp[14:]))
+	} else {
+		tmp = d.setupBMP(e, tmp)
+		return bmp.Decode(bytes.NewReader(tmp))
+	}
 }
 
-func (d *decoder) parseImage(e entry) (image.Image, error) {
-	b := make([]byte, e.Size)
-	n, err := io.ReadFull(d.r, b)
+func (d *decoder) parseConfig(e entry) (cfg image.Config, err error) {
+	tmp := make([]byte, 14+e.Size)
+	n, err := io.ReadFull(d.r, tmp[14:])
 	if n != int(e.Size) {
-		return nil, fmt.Errorf("Only %d of %d bytes read.", n, e.Size)
+		return cfg, fmt.Errorf("Only %d of %d bytes read.", n, e.Size)
 	}
 	if err != nil {
-		return nil, err
+		return cfg, err
 	}
 
-	fileHeader := make([]byte, 14)
-	copy(fileHeader[0:2], "\x42\x4D")
-	binary.LittleEndian.PutUint32(fileHeader[2:6], e.Size+14)
+	cfg, err = png.DecodeConfig(bytes.NewReader(tmp[14:]))
+	if err != nil {
+		tmp = d.setupBMP(e, tmp)
+		cfg, err = bmp.DecodeConfig(bytes.NewReader(tmp))
+	}
+	return cfg, err
+}
+
+func (d *decoder) setupBMP(e entry, tmp []byte) []byte {
+	var w, h uint32
+	binary.Read(bytes.NewReader(tmp[14+4:14+8]), binary.LittleEndian, &w)
+	binary.Read(bytes.NewReader(tmp[14+8:14+12]), binary.LittleEndian, &h)
+
+	if h > w {
+		binary.LittleEndian.PutUint32(tmp[14+8:14+12], h/2)
+	}
+
+	copy(tmp[0:2], "\x42\x4D")
+	binary.LittleEndian.PutUint32(tmp[2:6], e.Size+14)
 	var iSize uint32
-	binary.Read(bytes.NewReader(b[24:28]), binary.LittleEndian, &iSize)
-	binary.LittleEndian.PutUint32(fileHeader[10:14], uint32(e.Size+14)-iSize)
+	binary.Read(bytes.NewReader(tmp[14+20:14+24]), binary.LittleEndian, &iSize)
+	binary.LittleEndian.PutUint32(tmp[10:14], e.Size+14-iSize)
 
-	bb := append(fileHeader, b...)
-	fmt.Println(len(bb))
-	fmt.Println(len(bb))
-	fmt.Println(len(bb))
-
-	err = ioutil.WriteFile("/vagrant_data/noheader.png", b, os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
-	err = ioutil.WriteFile("/vagrant_data/header.png", bb, os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
-	img, err := bmp.Decode(bytes.NewReader(bb))
-	return img, err
+	return tmp
 }
 
 func Decode(r io.Reader) (image.Image, error) {
@@ -189,12 +182,10 @@ func DecodeAll(r io.Reader) (*ICO, error) {
 
 func DecodeConfig(r io.Reader) (image.Config, error) {
 	var d decoder
-	if err := d.decode(r, false); err != nil {
+	if err := d.decode(r, true); err != nil {
 		return image.Config{}, err
 	}
-	return image.Config{
-	// TODO: Need to fill this in with ???
-	}, nil
+	return d.cfg, nil
 }
 
 func init() {
