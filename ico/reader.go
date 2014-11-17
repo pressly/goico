@@ -143,7 +143,8 @@ func (d *decoder) parseConfig(e entry) (cfg image.Config, err error) {
 }
 
 func (d *decoder) setupBMP(e entry, tmp []byte) []byte {
-	var w, h uint32
+	var dibSize, w, h uint32
+	binary.Read(bytes.NewReader(tmp[14:14+4]), binary.LittleEndian, &dibSize)
 	binary.Read(bytes.NewReader(tmp[14+4:14+8]), binary.LittleEndian, &w)
 	binary.Read(bytes.NewReader(tmp[14+8:14+12]), binary.LittleEndian, &h)
 
@@ -153,9 +154,7 @@ func (d *decoder) setupBMP(e entry, tmp []byte) []byte {
 
 	copy(tmp[0:2], "\x42\x4D")
 	binary.LittleEndian.PutUint32(tmp[2:6], e.Size+14)
-	var iSize uint32
-	binary.Read(bytes.NewReader(tmp[14+20:14+24]), binary.LittleEndian, &iSize)
-	binary.LittleEndian.PutUint32(tmp[10:14], e.Size+14-iSize)
+	binary.LittleEndian.PutUint32(tmp[10:14], 14+dibSize)
 
 	return tmp
 }
