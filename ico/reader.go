@@ -9,7 +9,7 @@ import (
 	"image/png"
 	"io"
 
-	"code.google.com/p/go.image/bmp"
+	bmp "github.com/jsummers/gobmp"
 )
 
 // A FormatError reports that the input is not a valid ICO.
@@ -154,7 +154,17 @@ func (d *decoder) setupBMP(e entry, tmp []byte) []byte {
 
 	copy(tmp[0:2], "\x42\x4D")
 	binary.LittleEndian.PutUint32(tmp[2:6], e.Size+14)
-	binary.LittleEndian.PutUint32(tmp[10:14], 14+dibSize)
+
+	var numColors uint32
+	binary.Read(bytes.NewReader(tmp[14+32:14+36]), binary.LittleEndian, &numColors)
+	var offset uint32
+	offset = 14 + dibSize + (numColors * 4)
+	if dibSize > 40 {
+		var iccSize uint32
+		binary.Read(bytes.NewReader(tmp[14+dibSize-8:14+dibSize-4]), binary.LittleEndian, &iccSize)
+		offset += iccSize
+	}
+	binary.LittleEndian.PutUint32(tmp[10:14], offset)
 
 	return tmp
 }
