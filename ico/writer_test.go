@@ -9,28 +9,26 @@ import (
 	"github.com/jsummers/gobmp"
 )
 
-const testImage = "/vagrant_data/wikipedia.ico"
-
-func TestDecodeAll(t *testing.T) {
+func TestEncode(t *testing.T) {
+	testImage := "/vagrant_data/text.bmp"
 	data, err := ioutil.ReadFile(testImage)
 	if err != nil {
 		t.Error(err)
 	}
 	r := bytes.NewReader(data)
-	ic, err := DecodeAll(r)
+	m, err := gobmp.Decode(r)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w, err := os.Create("/vagrant_data/wikipedia.bmp")
+	w, err := os.Create("/vagrant_data/flizzletest.ico")
 	if err != nil {
 		t.Error(err)
 	}
 
-	options := new(gobmp.EncoderOptions)
-	options.SupportTransparency(true)
-	err = gobmp.EncodeWithOptions(w, ic.Image[0], options)
+	err = Encode(w, m)
 	if err != nil {
 		t.Error(err)
 	}
+	w.Close()
 }
