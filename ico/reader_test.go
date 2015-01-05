@@ -2,14 +2,13 @@ package ico
 
 import (
 	"bytes"
+	"image/png"
 	"io/ioutil"
 	"os"
 	"testing"
-
-	"github.com/jsummers/gobmp"
 )
 
-const testImage = "/vagrant_data/wikipedia.ico"
+const testImage = "testdata/wiki.ico"
 
 func TestDecodeAll(t *testing.T) {
 	data, err := ioutil.ReadFile(testImage)
@@ -22,14 +21,12 @@ func TestDecodeAll(t *testing.T) {
 		t.Error(err)
 	}
 
-	w, err := os.Create("/vagrant_data/wikipedia.bmp")
+	w, err := os.Create("testdata/wiki.png")
 	if err != nil {
 		t.Error(err)
 	}
 
-	options := new(gobmp.EncoderOptions)
-	options.SupportTransparency(true)
-	err = gobmp.EncodeWithOptions(w, ic.Image[0], options)
+	err = png.Encode(w, ic.Image[0])
 	if err != nil {
 		t.Error(err)
 	}
