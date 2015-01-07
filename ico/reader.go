@@ -10,6 +10,7 @@ import (
 	"image/draw"
 	"image/png"
 	"io"
+	"io/ioutil"
 
 	bmp "github.com/jsummers/gobmp"
 )
@@ -103,6 +104,11 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	//return png.Decode(bytes.NewReader(tmp[14:]))
 	//} else {
 	bmpBytes, maskBytes, err := d.setupBMP(e)
+
+	//DELETE THIS
+	ioutil.WriteFile("lol.bmp", bmpBytes, 600)
+	ioutil.WriteFile("mask.bmp", maskBytes, 600)
+
 	if err != nil {
 		return nil, err
 	}
@@ -113,22 +119,37 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	b := src.Bounds()
 
 	mask := image.NewAlpha(image.Rect(0, 0, b.Dx(), b.Dy()))
-	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	//draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)
-
 	//Fill in mask from the ICO file's AND mask data
 	rowSize := ((int(e.Width) + 31) / 32) * 4
 	for r := 0; r < int(e.Height); r++ {
 		for c := 0; c < int(e.Width); c++ {
+			// 32 bit bmps do hacky things with an alpha channel
+
 			alpha := (maskBytes[r*rowSize+c/8] >> (1 * (7 - uint(c)%8))) & 0x01
 			if alpha != 1 {
 				mask.SetAlpha(c, r, color.Alpha{255})
 			}
 		}
 	}
-	draw.DrawMask(dst, dst.Bounds(), src, b.Min, mask, b.Min, draw.Src)
-	//	unc DrawMask(dst Image, r image.Rectangle, src image.Image, sp image.Point,
-	// mask image.Image, mp image.Point, op Op)
+	if e.Bits != 32 {
+		// For non 32 bit images, we draw a mask from the AND mask on the BMP we extracted from the XOR mask
+		draw.DrawMask(dst, dst.Bounds(), src, b.Min, mask, b.Min, draw.Src)
+	} else { // we need to hand draw the 32 bit image ourselves
+		// 32 bit BMP images are actually 4 byte RGBA values, not the standard bmp encoding we expect
+		rdr := bytes.NewReader(bmpBytes[54:])
+		b := make([]byte, 4)
+		for r := int(e.Height) - 1; r >= 0; r-- {
+			for c := 0; c < int(e.Width); c++ {
+				// We're assuming pixel data starts at 54
+				io.ReadFull(rdr, b)
+				dst.SetNRGBA(c, r, color.NRGBA{b[2], b[1], b[0], b[3]})
+			}
+		}
+
+	}
+
 	return dst, nil
 	//}
 }
