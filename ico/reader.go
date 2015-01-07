@@ -123,7 +123,7 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	//draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)
 	//Fill in mask from the ICO file's AND mask data
 	rowSize := ((int(e.Width) + 31) / 32) * 4
-	for r := 0; r < int(e.Height); r++ {
+	for r := int(e.Height) - 1; r >= 0; r-- {
 		for c := 0; c < int(e.Width); c++ {
 			// 32 bit bmps do hacky things with an alpha channel
 
