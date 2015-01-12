@@ -215,8 +215,31 @@ func (d *decoder) setupBMP(e entry) ([]byte, []byte, error) {
 	// Calculate offset into image data
 	var numColors uint32
 	binary.Read(bytes.NewReader(img[14+32:14+36]), binary.LittleEndian, &numColors)
+
+	var bpp uint16
+	binary.Read(bytes.NewReader(img[14+14:14+16]), binary.LittleEndian, &bpp)
+
+	switch int(bpp) {
+	case 1, 2, 4, 8:
+		x := uint32(1 << bpp)
+		if numColors == 0 || numColors > x {
+			numColors = x
+		}
+	default:
+		numColors = 0
+	}
+
+	var numColorsSize uint32
+	switch int(dibSize) {
+	case 12, 64:
+		numColorsSize = numColors * 3
+	default:
+		numColorsSize = numColors * 4
+	}
+
 	var offset uint32
-	offset = 14 + dibSize + (numColors * 4)
+	offset = 14 + dibSize + numColorsSize
+
 	if dibSize > 40 {
 		var iccSize uint32
 		binary.Read(bytes.NewReader(img[14+dibSize-8:14+dibSize-4]), binary.LittleEndian, &iccSize)
