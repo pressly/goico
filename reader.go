@@ -10,7 +10,6 @@ import (
 	"image/draw"
 	"image/png"
 	"io"
-	"io/ioutil"
 
 	bmp "github.com/jsummers/gobmp"
 )
@@ -98,26 +97,35 @@ func (d *decoder) readImageDir(configOnly bool) error {
 }
 
 func (d *decoder) parseImage(e entry) (image.Image, error) {
+	// Check if the ICO entry has width and height of 0, which means 256
+	// Microsoft recommends that 256x256 images be stored as PNGs so need to
+	// check if they are PNGs and decode as such. Otherwise, decode as BMP.
+	if e.Width == 0 && e.Height == 0 {
+		img := make([]byte, e.Size)
+		n, err := io.ReadFull(d.r, img)
+		if n != int(e.Size) {
+			return nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
+		}
+		if err == nil {
+			_, err = png.DecodeConfig(bytes.NewReader(img))
+			if err == nil {
+				return png.Decode(bytes.NewReader(img))
+			}
+		}
+	}
 
-	//_, err = png.DecodeConfig(bytes.NewReader(tmp[14:]))
-	//if err == nil {
-	//return png.Decode(bytes.NewReader(tmp[14:]))
-	//} else {
+	// Decode as BMP instead
 	bmpBytes, maskBytes, err := d.setupBMP(e)
-
-	//DELETE THIS
-	ioutil.WriteFile("lol.bmp", bmpBytes, 600)
-	ioutil.WriteFile("mask.bmp", maskBytes, 600)
-
 	if err != nil {
 		return nil, err
 	}
+
 	src, err := bmp.Decode(bytes.NewReader(bmpBytes))
 	if err != nil {
 		return nil, err
 	}
-	bnd := src.Bounds()
 
+	bnd := src.Bounds()
 	mask := image.NewAlpha(image.Rect(0, 0, bnd.Dx(), bnd.Dy()))
 	dst := image.NewNRGBA(image.Rect(0, 0, bnd.Dx(), bnd.Dy()))
 	//draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)
@@ -173,9 +181,13 @@ func (d *decoder) setupBMP(e entry) ([]byte, []byte, error) {
 
 	// calculate image sizes
 	// See wikipedia en.wikipedia.org/wiki/BMP_file_format
-	rowSize := (1 * (int(e.Width) + 31) / 32) * 4
-	maskSize := rowSize * int(e.Height)
-	imageSize := int(e.Size) - maskSize
+	var maskSize int
+	imageSize := int(e.Size)
+	if e.Bits != 32 {
+		rowSize := (1 * (int(e.Width) + 31) / 32) * 4
+		maskSize = rowSize * int(e.Height)
+		imageSize -= maskSize
+	}
 
 	img := make([]byte, 14+imageSize)
 	mask := make([]byte, maskSize)
@@ -218,10 +230,15 @@ func (d *decoder) setupBMP(e entry) ([]byte, []byte, error) {
 
 	var bpp uint16
 	binary.Read(bytes.NewReader(img[14+14:14+16]), binary.LittleEndian, &bpp)
+	e.Bits = bpp
 
-	switch int(bpp) {
+	var size uint32
+	binary.Read(bytes.NewReader(img[14+20:14+24]), binary.LittleEndian, &size)
+	e.Size = size
+
+	switch int(e.Bits) {
 	case 1, 2, 4, 8:
-		x := uint32(1 << bpp)
+		x := uint32(1 << e.Bits)
 		if numColors == 0 || numColors > x {
 			numColors = x
 		}
