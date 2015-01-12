@@ -14,6 +14,8 @@ import (
 	bmp "github.com/jsummers/gobmp"
 )
 
+const pngHeader = "\x89PNG\r\n\x1a\n"
+
 // A FormatError reports that the input is not a valid ICO.
 type FormatError string
 
@@ -97,25 +99,22 @@ func (d *decoder) readImageDir(configOnly bool) error {
 }
 
 func (d *decoder) parseImage(e entry) (image.Image, error) {
-	// Check if the ICO entry has width and height of 0, which means 256
-	// Microsoft recommends that 256x256 images be stored as PNGs so need to
-	// check if they are PNGs and decode as such. Otherwise, decode as BMP.
-	if e.Width == 0 && e.Height == 0 {
-		img := make([]byte, e.Size)
-		n, err := io.ReadFull(d.r, img)
-		if n != int(e.Size) {
-			return nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
-		}
-		if err == nil {
-			_, err = png.DecodeConfig(bytes.NewReader(img))
-			if err == nil {
-				return png.Decode(bytes.NewReader(img))
-			}
-		}
+	data := make([]byte, e.Size)
+	n, err := io.ReadFull(d.r, data)
+	if n != int(e.Size) {
+		return nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the image is a PNG by the first 8 bytes of the image data
+	if string(data[:len(pngHeader)]) == pngHeader {
+		return png.Decode(bytes.NewReader(data))
 	}
 
 	// Decode as BMP instead
-	bmpBytes, maskBytes, err := d.setupBMP(e)
+	bmpBytes, maskBytes, err := d.setupBMP(e, data)
 	if err != nil {
 		return nil, err
 	}
@@ -153,12 +152,11 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	draw.DrawMask(dst, dst.Bounds(), src, bnd.Min, mask, bnd.Min, draw.Src)
 
 	return dst, nil
-	//}
 }
 
 func (d *decoder) parseConfig(e entry) (cfg image.Config, err error) {
-	tmp := make([]byte, 14+e.Size)
-	n, err := io.ReadFull(d.r, tmp[14:])
+	tmp := make([]byte, e.Size)
+	n, err := io.ReadFull(d.r, tmp)
 	if n != int(e.Size) {
 		return cfg, fmt.Errorf("Only %d of %d bytes read.", n, e.Size)
 	}
@@ -166,15 +164,15 @@ func (d *decoder) parseConfig(e entry) (cfg image.Config, err error) {
 		return cfg, err
 	}
 
-	cfg, err = png.DecodeConfig(bytes.NewReader(tmp[14:]))
+	cfg, err = png.DecodeConfig(bytes.NewReader(tmp))
 	if err != nil {
-		tmp, _, _ = d.setupBMP(e)
+		tmp, _, _ = d.setupBMP(e, tmp)
 		cfg, err = bmp.DecodeConfig(bytes.NewReader(tmp))
 	}
 	return cfg, err
 }
 
-func (d *decoder) setupBMP(e entry) ([]byte, []byte, error) {
+func (d *decoder) setupBMP(e entry, data []byte) ([]byte, []byte, error) {
 	// Ico files are made up of a XOR mask and an AND mask
 	// The XOR mask is the image itself, while the AND mask is a 1 bit-per-pixel alpha channel.
 	// setupBMP returns the image as a BMP format byte array, and the mask as a (1bpp) pixel array
@@ -192,21 +190,16 @@ func (d *decoder) setupBMP(e entry) ([]byte, []byte, error) {
 	img := make([]byte, 14+imageSize)
 	mask := make([]byte, maskSize)
 
+	var n int
 	// Read in image
-	n, err := io.ReadFull(d.r, img[14:])
+	n = copy(img[14:], data[:imageSize])
 	if n != imageSize {
-		return nil, nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
-	}
-	if err != nil {
-		return nil, nil, err
+		return nil, nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, imageSize))
 	}
 	// Read in mask
-	n, err = io.ReadFull(d.r, mask)
+	n = copy(mask, data[imageSize:])
 	if n != maskSize {
-		return nil, nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
-	}
-	if err != nil {
-		return nil, nil, err
+		return nil, nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, maskSize))
 	}
 
 	var dibSize, w, h uint32
