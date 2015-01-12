@@ -100,13 +100,7 @@ func (d *decoder) readImageDir(configOnly bool) error {
 
 func (d *decoder) parseImage(e entry) (image.Image, error) {
 	data := make([]byte, e.Size)
-	n, err := io.ReadFull(d.r, data)
-	if n != int(e.Size) {
-		return nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, e.Size))
-	}
-	if err != nil {
-		return nil, err
-	}
+	io.ReadFull(d.r, data)
 
 	// Check if the image is a PNG by the first 8 bytes of the image data
 	if string(data[:len(pngHeader)]) == pngHeader {
@@ -114,7 +108,7 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	}
 
 	// Decode as BMP instead
-	bmpBytes, maskBytes, err := d.setupBMP(e, data)
+	bmpBytes, maskBytes, offset, err := d.setupBMP(e, data)
 	if err != nil {
 		return nil, err
 	}
@@ -131,21 +125,22 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 	//Fill in mask from the ICO file's AND mask data
 	rowSize := ((int(e.Width) + 31) / 32) * 4
 	b := make([]byte, 4)
-	for r := int(e.Height) - 1; r >= 0; r-- {
+	_, _ = offset, b
+	for r := 0; r < int(e.Height); r++ {
 		for c := 0; c < int(e.Width); c++ {
-			// 32 bit bmps do hacky things with an alpha channel, it's included as the 4th byte of the colors
-			if e.Bits == 32 {
-				// TO DO calculate offset correctly !!!
-				offset := 54
-				imageRowSize := ((int(e.Bits)*int(e.Width) + 31) / 32) * 4
-				io.ReadFull(bytes.NewReader(bmpBytes[offset+r*imageRowSize+c*4:]), b)
-				mask.SetAlpha(c, r, color.Alpha{b[3]})
-			} else {
+			_, _ = maskBytes, rowSize
+			if len(maskBytes) > 0 {
 				alpha := (maskBytes[r*rowSize+c/8] >> (1 * (7 - uint(c)%8))) & 0x01
 				if alpha != 1 {
-					mask.SetAlpha(c, r, color.Alpha{255})
+					mask.SetAlpha(c, int(e.Height)-r-1, color.Alpha{255})
 				}
 
+			}
+			// 32 bit bmps do hacky things with an alpha channel, it's included as the 4th byte of the colors
+			if e.Bits == 32 {
+				imageRowSize := ((int(e.Bits)*int(e.Width) + 31) / 32) * 4
+				io.ReadFull(bytes.NewReader(bmpBytes[offset+r*imageRowSize+c*4:]), b)
+				mask.SetAlpha(c, int(e.Height)-r-1, color.Alpha{b[3]})
 			}
 		}
 	}
@@ -166,21 +161,25 @@ func (d *decoder) parseConfig(e entry) (cfg image.Config, err error) {
 
 	cfg, err = png.DecodeConfig(bytes.NewReader(tmp))
 	if err != nil {
-		tmp, _, _ = d.setupBMP(e, tmp)
+		tmp, _, _, _ = d.setupBMP(e, tmp)
 		cfg, err = bmp.DecodeConfig(bytes.NewReader(tmp))
 	}
 	return cfg, err
 }
 
-func (d *decoder) setupBMP(e entry, data []byte) ([]byte, []byte, error) {
+func (d *decoder) setupBMP(e entry, data []byte) ([]byte, []byte, int, error) {
 	// Ico files are made up of a XOR mask and an AND mask
 	// The XOR mask is the image itself, while the AND mask is a 1 bit-per-pixel alpha channel.
 	// setupBMP returns the image as a BMP format byte array, and the mask as a (1bpp) pixel array
 
 	// calculate image sizes
 	// See wikipedia en.wikipedia.org/wiki/BMP_file_format
-	var maskSize int
-	imageSize := int(e.Size)
+	var imageSize, maskSize int
+	if int(e.Size) < len(data) {
+		imageSize = int(e.Size)
+	} else {
+		imageSize = len(data)
+	}
 	if e.Bits != 32 {
 		rowSize := (1 * (int(e.Width) + 31) / 32) * 4
 		maskSize = rowSize * int(e.Height)
@@ -194,12 +193,12 @@ func (d *decoder) setupBMP(e entry, data []byte) ([]byte, []byte, error) {
 	// Read in image
 	n = copy(img[14:], data[:imageSize])
 	if n != imageSize {
-		return nil, nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, imageSize))
+		return nil, nil, 0, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, imageSize))
 	}
 	// Read in mask
 	n = copy(mask, data[imageSize:])
 	if n != maskSize {
-		return nil, nil, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, maskSize))
+		return nil, nil, 0, FormatError(fmt.Sprintf("only %d of %d bytes read.", n, maskSize))
 	}
 
 	var dibSize, w, h uint32
@@ -257,7 +256,7 @@ func (d *decoder) setupBMP(e entry, data []byte) ([]byte, []byte, error) {
 	}
 	binary.LittleEndian.PutUint32(img[10:14], offset)
 
-	return img, mask, nil
+	return img, mask, int(offset), nil
 }
 
 func Decode(r io.Reader) (image.Image, error) {
