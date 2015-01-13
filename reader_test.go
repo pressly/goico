@@ -3,7 +3,7 @@ package ico
 import (
 	"bytes"
 	"fmt"
-	"image/png"
+	"image/jpeg"
 	"io/ioutil"
 	"path/filepath"
 	"testing"
@@ -11,8 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const testICO = "testdata/wiki.ico"
-const testPNG = "testdata/wiki.png"
+const (
+	testICO = "testdata/wiki.ico"
+	testPNG = "testdata/wiki.png"
+)
 
 func TestDecodeAll(t *testing.T) {
 	assert := assert.New(t)
@@ -32,28 +34,28 @@ func TestDecodeAll(t *testing.T) {
 		}
 
 		for i, im := range ic.Image {
-			var pngName string
+			var jpgName string
 			if len(ic.Image) == 1 {
-				pngName = f + ".png"
+				jpgName = f + ".jpg"
 			} else {
-				pngName = f + fmt.Sprintf("-%d.png", i)
+				jpgName = f + fmt.Sprintf("-%d.jpg", i)
 			}
-			pngData, err := ioutil.ReadFile(pngName)
-			assert.NoError(err, pngName)
+			jpgData, err := ioutil.ReadFile(jpgName)
+			assert.NoError(err, jpgName)
 
-			r = bytes.NewReader(pngData)
-			pngImage, err := png.Decode(r)
-			assert.NoError(err, pngName)
+			r = bytes.NewReader(jpgData)
+			jpgImage, err := jpeg.Decode(r)
+			assert.NoError(err, jpgName)
 			if err != nil {
 				continue
 			}
 
-			assert.Equal(im.Bounds(), pngImage.Bounds())
-			// TODO: Check for pixel color equality between PNGs generated with imagemagick, and our renderer
+			assert.Equal(im.Bounds(), jpgImage.Bounds())
+			// TODO: Check for pixel color equality between jpgs generated with imagemagick, and our renderer
 			/*for i := im.Bounds().Min.X; i <= im.Bounds().Max.X; i++ {
 				for j := im.Bounds().Min.Y; j <= im.Bounds().Max.Y; j++ {
 					r, g, b, a := im.At(i, j).RGBA()
-					r2, g2, b2, a2 := pngImage.At(i, j).RGBA()
+					r2, g2, b2, a2 := jpgImage.At(i, j).RGBA()
 					assert.Equal(r, r2, fmt.Sprintf("%s: red at %d, %d", f, i, j))
 					assert.Equal(g, g2, fmt.Sprintf("%s: green at %d, %d", f, i, j))
 					assert.Equal(b, b2, fmt.Sprintf("%s: blue at %d, %d", f, i, j))
