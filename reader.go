@@ -286,7 +286,3 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	}
 	return d.cfg, nil
 }
-
-func init() {
-	image.RegisterFormat("ico", "", Decode, DecodeConfig)
-}
