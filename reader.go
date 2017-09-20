@@ -139,8 +139,15 @@ func (d *decoder) parseImage(e entry) (image.Image, error) {
 			// 32 bit bmps do hacky things with an alpha channel, it's included as the 4th byte of the colors
 			if e.Bits == 32 {
 				imageRowSize := ((int(e.Bits)*int(e.Width) + 31) / 32) * 4
-				io.ReadFull(bytes.NewReader(bmpBytes[offset+r*imageRowSize+c*4:]), b)
-				mask.SetAlpha(c, int(e.Height)-r-1, color.Alpha{b[3]})
+
+				alphaPosition := offset + r*imageRowSize + c*4
+				var alpha color.Alpha
+				if alphaPosition < len(bmpBytes) {
+					io.ReadFull(bytes.NewReader(bmpBytes[alphaPosition:]), b)
+					alpha = color.Alpha{b[3]}
+				}
+
+				mask.SetAlpha(c, int(e.Height)-r-1, alpha)
 			}
 		}
 	}
